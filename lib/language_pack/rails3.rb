@@ -69,37 +69,40 @@ private
 
         topic("Preparing app for Rails asset pipeline")
 
-        if user_env_hash.empty?
-          default_env = {
-            "RAILS_GROUPS" => ENV["RAILS_GROUPS"] || "assets",
-            "RAILS_ENV"    => ENV["RAILS_ENV"]    || "production",
-            "DATABASE_URL" => ENV["DATABASE_URL"] || default_database_url
-          }
-        else
-          default_env = {
-            "RAILS_GROUPS" => "assets",
-            "RAILS_ENV"    => "production",
-            "DATABASE_URL" => default_database_url
-          }
-        end
-
-        precompile.invoke(env: default_env.merge(user_env_hash))
+        precompile.invoke(env: rake_env)
 
         if precompile.success?
           log "assets_precompile", :status => "success"
           puts "Asset precompilation completed (#{"%.2f" % precompile.time}s)"
         else
-          log "assets_precompile", :status => "failure"
-          error "Precompiling assets failed."
+          precompile_fail(precompile.output)
         end
       end
     end
   end
 
+  def rake_env
+    if user_env_hash.empty?
+      default_env = {
+        "RAILS_GROUPS" => ENV["RAILS_GROUPS"] || "assets",
+        "RAILS_ENV"    => ENV["RAILS_ENV"]    || "production",
+        "DATABASE_URL" => database_url
+      }
+    else
+      default_env = {
+        "RAILS_GROUPS" => "assets",
+        "RAILS_ENV"    => "production",
+        "DATABASE_URL" => database_url
+      }
+    end
+    default_env.merge(user_env_hash)
+  end
+
   # generate a dummy database_url
-  def default_database_url
+  def database_url
     instrument "rails3.setup_database_url_env" do
       # need to use a dummy DATABASE_URL here, so rails can load the environment
+      return env("DATABASE_URL") if env("DATABASE_URL")
       scheme =
         if bundler.has_gem?("pg") || bundler.has_gem?("jdbc-postgres")
           "postgres"

@@ -1,5 +1,161 @@
 ## Master
 
+## v116 (4/10/2014)
+
+Features:
+
+
+Bugfixes:
+
+* Revert back to Bundler 1.5.2
+
+
+## v115 (4/9/2014)
+
+Features:
+
+
+Bugfixes:
+
+* Add default process types to all apps deployed regardless of `Procfile`
+
+## v114 (4/9/2014)
+
+Features:
+
+* Bundler 1.6.1
+* Warn when not using a Procfile (looking at you webrick)
+
+Bugfixes:
+
+
+## v113 (4/8/2014)
+
+Features:
+
+* use heroku-buildpack-nodejs's node binary
+* `CURL_CONNECT_TIMEOUT` and `CURL_TIMEOUT` are configurable as ENV vars
+
+Bugfixes:
+
+* Don't double print "Running: rake assets:precompile" on Ruby apps
+
+
+## v112 (3/27/2014)
+
+Features:
+
+
+Bugfixes:
+
+* compile psych with libyaml 0.1.6 for CVE-2014-2525
+
+## v111 (3/20/2014)
+
+Features:
+
+
+Bugfixes:
+
+* spelling
+
+
+## v110 (3/20/2014)
+
+Features:
+
+* Better message when running `assets:precompile` without a database
+
+Bugfixes:
+
+## v108 (2/27/2014)
+
+Features:
+
+* parse Bundler patchlevel option
+
+Bugfixes:
+
+* don't let users step on themselves by replacing `env` in `$PATH`
+
+## v107 (2/26/2014)
+
+Features:
+
+Bugfixes:
+
+* more shellescaping bug fixes
+
+
+## v105
+
+Rollbacked to v103
+
+
+## v104 (2/26/2014)
+
+Features:
+
+Bugfixes:
+
+* fix bugs in shellescaping (#231)
+
+
+## v103 (2/18/2014)
+
+Features:
+
+* Rails 4.1.0 Support. Stop writing database.yml and support for secrets.yml by generating SECRET_KEY_BASE for users.
+
+Bugfixes:
+
+
+## v102 (2/6/2014)
+
+Features:
+
+Bugfixes:
+
+* use blacklist of env vars, so users can't break the build process
+
+
+## v101 (2/5/2014)
+
+Features:
+
+Bugfixes:
+
+* fix rake detection when DATABASE_URL is not present
+* support BUNDLE_WITHOUT when using ponies
+* quote ponies env vars, so build doesn't break
+
+
+## v100 (2/4/2014)
+
+Features:
+
+Bugfixes:
+
+* compile psych with libyaml 0.1.5 for CVE-2013-6393
+
+## v99 (2/4/2014)
+
+Features:
+
+* Noop
+
+Bugfixes:
+
+
+## v98 (1/30/2014)
+
+Features:
+
+Bugfixes:
+
+* Use vendored JDK binary during build
+
+
 ## v97 (1/30/2014)
 
 Features:

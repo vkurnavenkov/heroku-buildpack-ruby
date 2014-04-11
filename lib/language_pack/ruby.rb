@@ -10,7 +10,7 @@ require "language_pack/version"
 # base Ruby Language Pack. This is for any base ruby app.
 class LanguagePack::Ruby < LanguagePack::Base
   NAME                 = "ruby"
-  LIBYAML_VERSION      = "0.1.4"
+  LIBYAML_VERSION      = "0.1.6"
   LIBYAML_PATH         = "libyaml-#{LIBYAML_VERSION}"
   BUNDLER_VERSION      = "1.5.2"
   BUNDLER_GEM_PATH     = "bundler-#{BUNDLER_VERSION}"
@@ -21,6 +21,7 @@ class LanguagePack::Ruby < LanguagePack::Base
   LEGACY_JVM_VERSION   = "openjdk1.7.0_25"
   DEFAULT_RUBY_VERSION = "ruby-2.0.0"
   RBX_BASE_URL         = "http://binaries.rubini.us/heroku"
+  NODE_BP_PATH         = "vendor/node/bin"
 
   # detects if this is a valid Ruby app
   # @return [Boolean] true if it's a Ruby app
@@ -58,9 +59,6 @@ class LanguagePack::Ruby < LanguagePack::Base
     instrument "ruby.default_config_vars" do
       vars = {
         "LANG"     => "en_US.UTF-8",
-        "PATH"     => default_path,
-        "GEM_PATH" => slug_vendor_base,
-        "GEM_HOME" => slug_vendor_base
       }
 
       ruby_version.jruby? ? vars.merge({
@@ -111,7 +109,15 @@ private
     # to the wrong --prefix ruby binstubs
     # breaking require. This only applies to Ruby 1.9.2 and 1.8.7.
     safe_binstubs = binstubs_relative_paths - ["bin"]
-    "#{safe_binstubs.join(":")}:#{ENV["PATH"]}:bin:#{system_paths}"
+    paths         = [
+      ENV["PATH"],
+      "bin",
+      system_paths,
+    ]
+    paths.unshift("#{slug_vendor_jvm}/bin") if ruby_version.jruby?
+    paths.unshift(safe_binstubs)
+
+    paths.join(":")
   end
 
   def binstubs_relative_paths
@@ -215,6 +221,7 @@ private
   def setup_language_pack_environment
     instrument 'ruby.setup_language_pack_environment' do
       setup_ruby_install_env
+      ENV["PATH"] += ":#{node_bp_bin_path}" if node_js_installed?
 
       # TODO when buildpack-env-args rolls out, we can get rid of
       # ||= and the manual setting below
@@ -224,7 +231,7 @@ private
 
       ENV["GEM_PATH"] = slug_vendor_base
       ENV["GEM_HOME"] = slug_vendor_base
-      ENV["PATH"]     = config_vars["PATH"]
+      ENV["PATH"]     = default_path
     end
   end
 
@@ -482,7 +489,7 @@ EOF
   def build_bundler
     instrument 'ruby.build_bundler' do
       log("bundle") do
-        bundle_without = ENV["BUNDLE_WITHOUT"] || "development:test"
+        bundle_without = env("BUNDLE_WITHOUT") || "development:test"
         bundle_bin     = "bundle"
         bundle_command = "#{bundle_bin} install --without #{bundle_without} --path vendor/bundle --binstubs #{bundler_binstubs_path}"
         bundle_command = 'GIT_SSH="$HOME/.ssh/shim" ' + bundle_command if env('SSH_KEY')
@@ -515,26 +522,26 @@ WARNING
           install_libyaml(libyaml_dir)
 
           # need to setup compile environment for the psych gem
-          yaml_include   = File.expand_path("#{libyaml_dir}/include")
-          yaml_lib       = File.expand_path("#{libyaml_dir}/lib")
-          pwd            = run("pwd").chomp
+          yaml_include   = File.expand_path("#{libyaml_dir}/include").shellescape
+          yaml_lib       = File.expand_path("#{libyaml_dir}/lib").shellescape
+          pwd            = Dir.pwd
           bundler_path   = "#{pwd}/#{slug_vendor_base}/gems/#{BUNDLER_GEM_PATH}/lib"
           # we need to set BUNDLE_CONFIG and BUNDLE_GEMFILE for
           # codon since it uses bundler.
           env_vars       = {
             "BUNDLE_GEMFILE"                => "#{pwd}/Gemfile",
             "BUNDLE_CONFIG"                 => "#{pwd}/.bundle/config",
-            "CPATH"                         => "#{yaml_include}:$CPATH",
-            "CPPATH"                        => "#{yaml_include}:$CPPATH",
-            "LIBRARY_PATH"                  => "#{yaml_lib}:$LIBRARY_PATH",
-            "RUBYOPT"                       => "\"#{syck_hack}\"",
+            "CPATH"                         => noshellescape("#{yaml_include}:$CPATH"),
+            "CPPATH"                        => noshellescape("#{yaml_include}:$CPPATH"),
+            "LIBRARY_PATH"                  => noshellescape("#{yaml_lib}:$LIBRARY_PATH"),
+            "RUBYOPT"                       => syck_hack,
             "NOKOGIRI_USE_SYSTEM_LIBRARIES" => "true"
           }
           env_vars["BUNDLER_LIB_PATH"] = "#{bundler_path}" if ruby_version.ruby_version == "1.8.7"
           puts "Running: #{bundle_command}"
           instrument "ruby.bundle_install" do
             bundle_time = Benchmark.realtime do
-              bundler_output << pipe("#{bundle_command} --no-clean 2>&1", env: env_vars, user_env: true)
+              bundler_output << pipe("#{bundle_command} --no-clean", out: "2>&1", env: env_vars, user_env: true)
             end
           end
         end
@@ -548,7 +555,7 @@ WARNING
             if load_default_cache?
               run "bundle clean > /dev/null"
             else
-              pipe "#{bundle_bin} clean 2> /dev/null"
+              pipe("#{bundle_bin} clean", out: "2> /dev/null")
             end
           end
           cache.store ".bundle"
@@ -658,9 +665,23 @@ params = CGI.parse(uri.query || "")
   end
 
   def rake
-    @rake ||= LanguagePack::Helpers::RakeRunner.new(
+    @rake ||= begin
+      LanguagePack::Helpers::RakeRunner.new(
                 bundler.has_gem?("rake") || ruby_version.rake_is_vendored?
-              ).load_rake_tasks!
+              ).load_rake_tasks!(env: rake_env)
+    end
+  end
+
+  def rake_env
+    if database_url
+      { "DATABASE_URL" => database_url }
+    else
+      {}
+    end.merge(user_env_hash)
+  end
+
+  def database_url
+    env("DATABASE_URL") if env("DATABASE_URL")
   end
 
   # executes the block with GIT_DIR environment variable removed since it can mess with the current working directory git thinks it's in
@@ -681,7 +702,17 @@ params = CGI.parse(uri.query || "")
   # @note execjs will blow up if no JS RUNTIME is detected and is loaded.
   # @return [Array] the node.js binary path if we need it or an empty Array
   def add_node_js_binary
-    bundler.has_gem?('execjs') ? [NODE_JS_BINARY_PATH] : []
+    bundler.has_gem?('execjs') && !node_js_installed? ? [NODE_JS_BINARY_PATH] : []
+  end
+
+  def node_bp_bin_path
+    "#{Dir.pwd}/#{NODE_BP_PATH}"
+  end
+
+  # checks if node.js is installed via the official heroku-buildpack-nodejs using multibuildpack
+  # @return [Boolean] true if it's detected and false if it isn't
+  def node_js_installed?
+    @node_js_installed ||= run("#{node_bp_bin_path}/node -v") && $?.success?
   end
 
   def run_assets_precompile_rake_task
@@ -690,15 +721,24 @@ params = CGI.parse(uri.query || "")
       precompile = rake.task("assets:precompile")
       return true unless precompile.is_defined?
 
-      topic "Running: rake assets:precompile"
-      precompile.invoke
+      topic "Precompiling assets"
+      precompile.invoke(env: rake_env)
       if precompile.success?
         puts "Asset precompilation completed (#{"%.2f" % precompile.time}s)"
       else
-        log "assets_precompile", :status => "failure"
-        error "Precompiling assets failed."
+        precompile_fail(precompile.output)
       end
     end
+  end
+
+  def precompile_fail(output)
+    log "assets_precompile", :status => "failure"
+    msg = "Precompiling assets failed.\n"
+    if output.match(/(127\.0\.0\.1)|(org\.postgresql\.util)/)
+      msg << "Attempted to access a nonexistent database:\n"
+      msg << "https://devcenter.heroku.com/articles/pre-provision-database\n"
+    end
+    error msg
   end
 
   def bundler_cache
@@ -757,6 +797,13 @@ params = CGI.parse(uri.query || "")
       if @metadata.exists?(buildpack_version_cache) && (bv = @metadata.read(buildpack_version_cache).sub('v', '').to_i) && bv != 0 && bv <= 76
         puts "Fixing nokogiri install. Clearing bundler cache."
         puts "See https://github.com/sparklemotion/nokogiri/issues/923."
+        purge_bundler_cache
+      end
+
+      # recompile nokogiri to use new libyaml
+      if @metadata.exists?(buildpack_version_cache) && (bv = @metadata.read(buildpack_version_cache).sub('v', '').to_i) && bv != 0 && bv <= 99 && bundler.has_gem?("psych")
+        puts "Need to recompile psych for CVE-2013-6393. Clearing bundler cache."
+        puts "See http://bugs.debian.org/cgi-bin/bugreport.cgi?bug=737076."
         purge_bundler_cache
       end
 

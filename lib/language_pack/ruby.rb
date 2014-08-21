@@ -616,6 +616,14 @@ rescue URI::InvalidURIError
   raise "Invalid DATABASE_URL"
 end
 
+if ENV["DATABASE_SLAVE_URL"]
+  begin
+    slave_uri = URI.parse(ENV["DATABASE_SLAVE_URL"])
+  rescue URI::InvalidURIError
+    raise "Invalid DATABASE_SLAVE_URL"
+  end
+end
+
 raise "No RACK_ENV or RAILS_ENV found" unless ENV["RAILS_ENV"] || ENV["RACK_ENV"]
 
 def attribute(name, value, force_string = false)
@@ -658,6 +666,21 @@ params = CGI.parse(uri.query || "")
 <% params.each do |key, value| %>
   <%= key %>: <%= value.first %>
 <% end %>
+
+<% if slave_uri %>
+  <%
+    slave_adapter = slave_uri.scheme
+    slave_adapter = "postgresql" if slave_adapter == "postgres"
+  %>
+  slave0:
+    <%= attribute "adapter",  slave_adapter %>
+    <%= attribute "database", (slave_uri.path || "").split("/")[1] %>
+    <%= attribute "username", slave_uri.user %>
+    <%= attribute "password", slave_uri.password, true %>
+    <%= attribute "host",     slave_uri.host %>
+    <%= attribute "port",     slave_uri.port %>
+<% end %>
+
         DATABASE_YML
         end
       end
